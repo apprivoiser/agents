@@ -11,6 +11,7 @@ from livekit import rtc
 from .. import stt, tokenize, tts, utils, vad
 from ..llm import LLM, ChatContext, ChatMessage, FunctionContext, LLMStream
 from .agent_output import AgentOutput, SynthesisHandle
+from . import agent_output
 from .agent_playout import AgentPlayout
 from .human_input import HumanInput
 from .log import logger
@@ -359,6 +360,7 @@ class VoiceAssistant(utils.EventEmitter[EventTypes]):
             self.emit("user_stopped_speaking")
             self._deferred_validation.on_human_end_of_speech(ev)
             self._last_end_of_speech_time = time.time()
+            agent_output.last_end_of_speech_time = self._last_end_of_speech_time
 
         def _on_interim_transcript(ev: stt.SpeechEvent) -> None:
             self._transcribed_interim_text = ev.alternatives[0].text
@@ -368,6 +370,8 @@ class VoiceAssistant(utils.EventEmitter[EventTypes]):
             self._transcribed_text += (
                 " " if self._transcribed_text else ""
             ) + new_transcript
+            print(f"STT output: {self._transcribed_text}")
+            print(f"STT time: {time.time() - self._last_end_of_speech_time}")
 
             if self._opts.preemptive_synthesis:
                 self._synthesize_agent_reply()
@@ -741,7 +745,7 @@ class VoiceAssistant(utils.EventEmitter[EventTypes]):
         self._speech_q.append(speech_handle)
         self._speech_q_changed.set()
 
-
+first_frame_time = None
 async def _llm_stream_to_str_iterable(
     speech_id: str, stream: LLMStream
 ) -> AsyncIterable[str]:
@@ -761,6 +765,9 @@ async def _llm_stream_to_str_iterable(
                     "elapsed": round(time.time() - start_time, 3),
                 },
             )
+            global first_frame_time
+            first_frame_time = time.time()
+            print(f"first LLM token time: {first_frame_time - start_time}")
 
         yield content
 

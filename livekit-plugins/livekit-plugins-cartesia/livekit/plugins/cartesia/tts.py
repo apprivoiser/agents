@@ -109,28 +109,75 @@ class ChunkedStream(tts.ChunkedStream):
         data = _to_cartesia_options(self._opts)
         data["transcript"] = self._text
 
-        async with self._session.post(
-            "https://api.cartesia.ai/tts/bytes",
-            headers={
-                API_AUTH_HEADER: self._opts.api_key,
-                API_VERSION_HEADER: API_VERSION,
+        import uuid
+        from concurrent.futures import ThreadPoolExecutor
+        import requests
+        from pydub import AudioSegment
+        import io
+        appid = "7330060328"
+        access_token = "yI56AISkXttv-6FJgnHI5O-APe2yno2K"
+        cluster = "volcano_tts"
+
+        voice_type = "BV001_streaming"
+        host = "openspeech.bytedance.com"
+        api_url = f"https://{host}/api/v1/tts"
+
+        header = {"Authorization": f"Bearer;{access_token}"}
+
+        request_json = {
+            "app": {
+                "appid": appid,
+                "token": "access_token",
+                "cluster": cluster
             },
-            json=data,
-        ) as resp:
-            async for data, _ in resp.content.iter_chunks():
-                for frame in bstream.write(data):
+            "user": {
+                "uid": "388808087185088"
+            },
+            "audio": {
+                "voice_type": voice_type,
+                "encoding": "mp3",
+                "speed_ratio": 1.0,
+                "volume_ratio": 1.0,
+                "pitch_ratio": 1.0,
+            },
+            "request": {
+                "reqid": str(uuid.uuid4()),
+                "text": self._text,
+                "text_type": "plain",
+                "operation": "query",
+                "with_frontend": 1,
+                "frontend_type": "unitTson"
+
+            }
+        }
+
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as pool:
+            # 将同步的 requests.post 放入线程池中运行，以实现异步调用
+            response = await loop.run_in_executor(
+                pool,
+                lambda: requests.post(api_url, json.dumps(request_json), headers=header, verify=False)
+            )
+
+            print(f"TTS Response status: {response.status_code}")
+            if response.status_code == 200 and "data" in response.json():
+                decoded_data = base64.b64decode(response.json()["data"])
+                audio = AudioSegment.from_file(io.BytesIO(decoded_data))
+                audio = audio.set_frame_rate(self._opts.sample_rate).set_channels(NUM_CHANNELS).set_sample_width(2)
+                frame_data = audio.raw_data
+                for frame in bstream.write(frame_data):
                     self._event_ch.send_nowait(
                         tts.SynthesizedAudio(
                             request_id=request_id, segment_id=segment_id, frame=frame
                         )
                     )
 
-            for frame in bstream.flush():
-                self._event_ch.send_nowait(
-                    tts.SynthesizedAudio(
-                        request_id=request_id, segment_id=segment_id, frame=frame
+                for frame in bstream.flush():
+                    self._event_ch.send_nowait(
+                        tts.SynthesizedAudio(
+                            request_id=request_id, segment_id=segment_id, frame=frame
+                        )
                     )
-                )
 
 
 class SynthesizeStream(tts.SynthesizeStream):

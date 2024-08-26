@@ -13,7 +13,7 @@ from .agent_playout import AgentPlayout, PlayoutHandle
 from .log import logger
 
 SpeechSource = Union[AsyncIterable[str], str]
-
+last_end_of_speech_time = None
 
 class SynthesisHandle:
     def __init__(
@@ -225,6 +225,8 @@ async def _stream_synthesis_task(
                         "streamed": True,
                     },
                 )
+                print(f"first TTS frame time: {time.time() - start_time}")
+                print(f"end of speech - first TTS frame: {time.time() - last_end_of_speech_time}")
 
             if not handle._tr_fwd.closed:
                 handle._tr_fwd.push_audio(audio.frame)
